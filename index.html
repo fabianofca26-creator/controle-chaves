@@ -62,6 +62,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .dots{display:flex;justify-content:center;gap:3px;margin:4px 0 2px}
 .dots i{width:8px;height:8px;border-radius:50%;background:var(--ok-tx)}
 .dots i.out{background:var(--wa-tx)}
+.dots i.lost{background:var(--er-tx)}
+.ck .st.lost,.hist.lost,.hist.lost b{color:var(--er-tx)}
+.seg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.seg button{background:transparent;border:1px solid var(--line2);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer}
+.seg button:active{background:var(--ac);color:var(--ac-tx)}
 .ck{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:15px;color:var(--tx)}
 .ck:last-child{border-bottom:0}
 .ck input{width:22px;height:22px;flex:none;margin:0}
@@ -115,7 +120,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   <form method="dialog" onsubmit="salvarMov(event)">
     <h3 id="mTitulo" style="margin-bottom:12px"></h3>
     <div id="mChaves" style="margin-bottom:12px"></div>
-    <div class="field" id="mPessoaW"><label>Para quem</label><input id="mPessoa" list="pessoas" autocomplete="off"><datalist id="pessoas"></datalist></div>
+    <div class="field" id="mPessoaW"><label>Para quem</label><input id="mPessoa" list="pessoas" autocomplete="off"><datalist id="pessoas"></datalist>
+      <div class="seg" id="mFunc"></div></div>
     <div class="field"><label>Data</label><input id="mData" type="date" required></div>
     <div class="field"><label>Observação</label><input id="mObs"></div>
     <div class="row"><button class="btn sec" type="button" onclick="dlgMov.close()">Cancelar</button><button class="btn">Salvar</button></div>
@@ -123,6 +129,11 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 </dialog>
 
 <dialog id="dlgBackup">
+  <h3 style="margin-bottom:8px">Funcionários</h3>
+  <div id="funcLista" style="margin-bottom:8px"></div>
+  <form class="row" style="margin-bottom:18px" onsubmit="event.preventDefault(); addFunc()">
+    <input id="funcNovo" placeholder="Nome" autocomplete="off"><button class="btn sm n">+</button>
+  </form>
   <h3 style="margin-bottom:12px">Backup</h3>
   <p class="muted" id="bkInfo"></p>
   <button class="btn" onclick="exportar()">Exportar</button>
@@ -135,9 +146,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
 <script>
 // ---------- dados ----------
-// casa: {id, nome, chaves:[{id, nome, com:null|pessoa, desde:data}], hist:[{data, tipo:'entrega'|'devolucao', pessoa, chaves:[nome], obs}]}
+// casa: {id, nome, mod, fil, chaves:[{id, nome, com:null|pessoa, desde:data, perdida?:true}], hist:[{data, tipo:'entrega'|'devolucao'|'perda'|'achada', pessoa, chaves:[nome], obs}]}
 const K = "chaves-obra";
 let db = JSON.parse(localStorage.getItem(K) || '{"casas":[],"portas":["Frente","Fundos"],"backup":null}');
+db.funcionarios ??= [];
 const save = () => localStorage.setItem(K, JSON.stringify(db));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -158,21 +170,24 @@ if (!db.casas.length) {
 // ---------- lista ----------
 function render() {
   const q = busca.value.trim().toLowerCase();
-  const fora = db.casas.flatMap(c => c.chaves.filter(k => k.com).map(k => ({ ...k, casa: c.nome })));
-  resumo.textContent = `Alvorada 3 · ${fora.length} chave(s) fora`;
+  const fora = db.casas.flatMap(c => c.chaves.filter(k => k.com && !k.perdida).map(k => ({ ...k, casa: c.nome })));
+  const perdidas = db.casas.flatMap(c => c.chaves.filter(k => k.perdida).map(k => ({ ...k, casa: c.nome })));
+  resumo.textContent = `Alvorada 3 · ${fora.length} chave(s) fora` + (perdidas.length ? ` · ${perdidas.length} perdida(s)` : "");
   const bate = c => !q || c.nome.toLowerCase().includes(q) || c.chaves.some(k => k.com && k.com.toLowerCase().includes(q));
   // quem está com o quê
   const porPessoa = Object.groupBy(fora, k => k.com);
   comQuem.innerHTML = Object.keys(porPessoa).sort().map(p => `
-    <div class="hist"><b>${esc(p)}</b>: ${Object.entries(Object.groupBy(porPessoa[p], k => k.casa)).map(([casa, ks]) => `CASA ${esc(casa)} (${ks.map(k => esc(k.nome)).join(", ")})`).join(" · ")}</div>`).join("");
-  comQuem.classList.toggle("hide", !fora.length || !!q);
+    <div class="hist"><b>${esc(p)}</b>: ${Object.entries(Object.groupBy(porPessoa[p], k => k.casa)).map(([casa, ks]) => `CASA ${esc(casa)} (${ks.map(k => esc(k.nome)).join(", ")})`).join(" · ")}</div>`).join("")
+    + (perdidas.length ? `<div class="hist lost"><b>Perdidas</b>: ${perdidas.map(k => `CASA ${esc(k.casa)} (${esc(k.nome)})`).join(" · ")}</div>` : "");
+  comQuem.classList.toggle("hide", !(fora.length || perdidas.length) || !!q);
   // grade por módulo / fileira
   casas.innerHTML = FILEIRAS.map(([mod, fil]) => {
     const lista = db.casas.filter(c => c.mod === mod && c.fil === fil && bate(c)).sort((a, b) => a.nome - b.nome);
     return lista.length ? `<h2>Módulo ${mod} · Fileira ${fil}</h2><div class="grade">${lista.map(c => {
-      const nomes = [...new Set(c.chaves.filter(k => k.com).map(k => k.com.split(" ")[0]))];
+      const nomes = [...new Set(c.chaves.filter(k => k.com && !k.perdida).map(k => k.com.split(" ")[0]))];
+      if (c.chaves.some(k => k.perdida)) nomes.push("perdida");
       return `<div class="tile ${nomes.length ? "out" : ""}" onclick="abrirCasa('${c.id}')"><b>CASA ${esc(c.nome)}</b>
-        <div class="dots">${c.chaves.map(k => `<i class="${k.com ? "out" : ""}"></i>`).join("")}</div>
+        <div class="dots">${c.chaves.map(k => `<i class="${k.perdida ? "lost" : k.com ? "out" : ""}"></i>`).join("")}</div>
         <small>${esc(nomes.join(", "))}</small></div>`;
     }).join("")}</div>` : "";
   }).join("") || `<div class="empty">Nada encontrado.</div>`;
@@ -191,15 +206,32 @@ function abrirCasa(id) {
 function renderCasa() {
   const c = atual;
   cTitulo.textContent = `CASA ${c.nome} · Mód. ${c.mod} · Fil. ${c.fil}`;
-  const fora = c.chaves.filter(k => k.com);
+  const fora = c.chaves.filter(k => k.com && !k.perdida);
   cSub.textContent = fora.length ? `${fora.length} de ${c.chaves.length} fora` : "Todas as chaves na obra";
   btDev.disabled = !fora.length;
   cChaves.innerHTML = c.chaves.map(k => `
     <div class="ck"><span class="lb">${esc(k.nome)}</span>
-      <span class="st ${k.com ? "out" : ""}">${k.com ? `com ${esc(k.com)} desde ${fmt(k.desde)}` : "na obra"}</span></div>`).join("");
+      <span class="st ${k.perdida ? "lost" : k.com ? "out" : ""}">${k.perdida ? `PERDIDA${k.com ? " · estava com " + esc(k.com) : ""}` : k.com ? `com ${esc(k.com)} desde ${fmt(k.desde)}` : "na obra"}</span>
+      <button class="icobtn" title="${k.perdida ? "Encontrada" : "Marcar como perdida"}" onclick="perdida('${k.id}')">${k.perdida ? "↩" : "⚠"}</button></div>`).join("");
   cHist.innerHTML = c.hist.length ? c.hist.map(h => `
-    <div class="hist">${h.tipo === "entrega" ? "Entregue a" : "Devolvida por"} <b>${esc(h.pessoa)}</b>: ${h.chaves.map(esc).join(", ")}
+    <div class="hist">${{ entrega: "Entregue a", devolucao: "Devolvida por", perda: "PERDIDA", achada: "Encontrada" }[h.tipo]}${h.pessoa ? ` <b>${esc(h.pessoa)}</b>` : ""}: ${h.chaves.map(esc).join(", ")}
       <small>${fmt(h.data)}${h.obs ? " · " + esc(h.obs) : ""}</small></div>`).join("") : `<span class="muted">Sem movimentações.</span>`;
+}
+
+function perdida(id) {
+  const k = atual.chaves.find(k => k.id === id);
+  if (k.perdida) {
+    if (!confirm(`"${k.nome}" foi encontrada?`)) return;
+    k.perdida = false; k.com = null; k.desde = null;
+    atual.hist.unshift({ data: hoje(), tipo: "achada", pessoa: "", chaves: [k.nome], obs: "" });
+  } else {
+    const obs = prompt(`Marcar "${k.nome}" como perdida?${k.com ? " Estava com " + k.com + "." : ""}
+Observação (opcional):`);
+    if (obs === null) return;
+    k.perdida = true;
+    atual.hist.unshift({ data: hoje(), tipo: "perda", pessoa: k.com ? "(estava com " + k.com + ")" : "", chaves: [k.nome], obs: obs.trim() });
+  }
+  save(); renderCasa();
 }
 
 function menuCasa() {
@@ -216,6 +248,7 @@ function abrirMov(tipo, chaves, marcadas) {
   mTitulo.textContent = tipo === "entrega" ? "Entregar chaves" : "Devolver chaves";
   mPessoaW.classList.toggle("hide", tipo !== "entrega");
   mPessoa.value = ""; mObs.value = ""; mData.value = hoje();
+  mFunc.innerHTML = db.funcionarios.map(f => `<button type="button" onclick="mPessoa.value=this.textContent">${esc(f)}</button>`).join("");
   mChaves.innerHTML = chaves.map(k => `
     <label class="ck"><input type="checkbox" value="${k.id}" ${marcadas.includes(k) ? "checked" : ""}>
       <span class="lb">${esc(k.nome)}</span><span class="st">${k.com ? "com " + esc(k.com) : ""}</span></label>`).join("");
@@ -223,7 +256,7 @@ function abrirMov(tipo, chaves, marcadas) {
 }
 
 function abrirEntrega() {
-  const livres = atual.chaves.filter(k => !k.com);
+  const livres = atual.chaves.filter(k => !k.com && !k.perdida);
   if (!livres.length) return alert("Nenhuma chave disponível.");
   // ponytail: pré-marca 1 de cada porta (nome sem o número final); o resto é ajuste manual
   const porta = k => k.nome.replace(/\s*\d+$/, "");
@@ -232,7 +265,7 @@ function abrirEntrega() {
 }
 
 function abrirDevolucao() {
-  const fora = atual.chaves.filter(k => k.com);
+  const fora = atual.chaves.filter(k => k.com && !k.perdida);
   abrirMov("devolucao", fora, fora);
 }
 
@@ -252,8 +285,22 @@ function salvarMov(e) {
   save(); dlgMov.close(); renderCasa();
 }
 
+// ---------- funcionários ----------
+function renderFunc() {
+  funcLista.innerHTML = db.funcionarios.map((f, i) => `
+    <div class="ck"><span class="lb">${esc(f)}</span><button class="icobtn" type="button" onclick="delFunc(${i})">×</button></div>`).join("") || `<span class="muted">Nenhum cadastrado.</span>`;
+}
+function addFunc() {
+  const n = funcNovo.value.trim();
+  if (!n || db.funcionarios.includes(n)) return;
+  db.funcionarios.push(n); db.funcionarios.sort((a, b) => a.localeCompare(b));
+  funcNovo.value = ""; save(); renderFunc();
+}
+function delFunc(i) { db.funcionarios.splice(i, 1); save(); renderFunc(); }
+
 // ---------- backup ----------
 dlgBackup.addEventListener("toggle", () => {
+  renderFunc();
   bkInfo.textContent = db.backup ? `Último backup: ${fmt(db.backup)}` : "Nunca fez backup.";
 });
 function exportar() {
@@ -265,7 +312,7 @@ function exportar() {
 }
 function importar(f) {
   if (!f || !confirm("Substituir todos os dados pelo backup?")) return;
-  f.text().then(t => { const d = JSON.parse(t); if (!Array.isArray(d.casas)) throw 0; db = d; save(); dlgBackup.close(); abrirLista(); })
+  f.text().then(t => { const d = JSON.parse(t); if (!Array.isArray(d.casas)) throw 0; db = d; db.funcionarios ??= []; save(); dlgBackup.close(); abrirLista(); })
     .catch(() => alert("Arquivo inválido."));
 }
 
