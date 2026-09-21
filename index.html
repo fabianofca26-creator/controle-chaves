@@ -53,11 +53,11 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .btn:disabled{opacity:.4}
 .btn.sec{background:transparent;color:var(--tx);border:1px solid var(--line2);font-weight:400;padding:11px}
 .btn.sm{width:auto;padding:11px 14px;font-size:14px}
-.grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:6px}
+.grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center;cursor:pointer;min-height:64px}
 .tile.out{border-color:var(--wa-tx);background:var(--wa-bg)}
 .tile:active{opacity:.7}
-.tile b{font-size:16px;display:block}
+.tile b{font-size:13px;display:block;white-space:nowrap}
 .tile small{display:block;font-size:10px;color:var(--wa-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dots{display:flex;justify-content:center;gap:3px;margin:4px 0 2px}
 .dots i{width:8px;height:8px;border-radius:50%;background:var(--ok-tx)}
@@ -164,14 +164,14 @@ function render() {
   // quem está com o quê
   const porPessoa = Object.groupBy(fora, k => k.com);
   comQuem.innerHTML = Object.keys(porPessoa).sort().map(p => `
-    <div class="hist"><b>${esc(p)}</b>: ${Object.entries(Object.groupBy(porPessoa[p], k => k.casa)).map(([casa, ks]) => `casa ${esc(casa)} (${ks.map(k => esc(k.nome)).join(", ")})`).join(" · ")}</div>`).join("");
+    <div class="hist"><b>${esc(p)}</b>: ${Object.entries(Object.groupBy(porPessoa[p], k => k.casa)).map(([casa, ks]) => `CASA ${esc(casa)} (${ks.map(k => esc(k.nome)).join(", ")})`).join(" · ")}</div>`).join("");
   comQuem.classList.toggle("hide", !fora.length || !!q);
   // grade por módulo / fileira
   casas.innerHTML = FILEIRAS.map(([mod, fil]) => {
     const lista = db.casas.filter(c => c.mod === mod && c.fil === fil && bate(c)).sort((a, b) => a.nome - b.nome);
     return lista.length ? `<h2>Módulo ${mod} · Fileira ${fil}</h2><div class="grade">${lista.map(c => {
       const nomes = [...new Set(c.chaves.filter(k => k.com).map(k => k.com.split(" ")[0]))];
-      return `<div class="tile ${nomes.length ? "out" : ""}" onclick="abrirCasa('${c.id}')"><b>${esc(c.nome)}</b>
+      return `<div class="tile ${nomes.length ? "out" : ""}" onclick="abrirCasa('${c.id}')"><b>CASA ${esc(c.nome)}</b>
         <div class="dots">${c.chaves.map(k => `<i class="${k.com ? "out" : ""}"></i>`).join("")}</div>
         <small>${esc(nomes.join(", "))}</small></div>`;
     }).join("")}</div>` : "";
@@ -190,7 +190,7 @@ function abrirCasa(id) {
 
 function renderCasa() {
   const c = atual;
-  cTitulo.textContent = `Casa ${c.nome} · Mód. ${c.mod} · Fil. ${c.fil}`;
+  cTitulo.textContent = `CASA ${c.nome} · Mód. ${c.mod} · Fil. ${c.fil}`;
   const fora = c.chaves.filter(k => k.com);
   cSub.textContent = fora.length ? `${fora.length} de ${c.chaves.length} fora` : "Todas as chaves na obra";
   btDev.disabled = !fora.length;
@@ -206,7 +206,7 @@ function menuCasa() {
   const op = prompt("1 = adicionar chave\n2 = remover última chave\n3 = zerar histórico");
   if (op === "1") { const n = prompt("Nome da chave (ex: Portão 1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
   if (op === "2" && atual.chaves.length > 1 && confirm(`Remover "${atual.chaves.at(-1).nome}"?`)) { atual.chaves.pop(); save(); renderCasa(); }
-  if (op === "3" && confirm(`Apagar o histórico da casa ${atual.nome}?`)) { atual.hist = []; save(); renderCasa(); }
+  if (op === "3" && confirm(`Apagar o histórico da CASA ${atual.nome}?`)) { atual.hist = []; save(); renderCasa(); }
 }
 
 // ---------- movimentação ----------
