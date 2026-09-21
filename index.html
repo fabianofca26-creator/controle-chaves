@@ -66,6 +66,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .dots i{width:8px;height:8px;border-radius:50%;background:var(--ok-tx)}
 .dots i.out{background:var(--wa-tx)}
 .dots i.lost{background:var(--er-tx)}
+.dots i.unk{background:transparent;border:1.5px solid var(--tx3)}
+.ck .st.unk{color:var(--tx3);font-style:italic}
 .ck .st.lost,.hist.lost,.hist.lost b{color:var(--er-tx)}
 .seg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .seg button{background:transparent;border:1px solid var(--line2);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer}
@@ -106,7 +108,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button aria-pressed="false" onclick="filtrarMod(3)">Mód. 3</button>
   </div>
   <div class="row" style="margin-top:10px">
-    <button class="btn sec sm" style="flex:1" onclick="iniciarMassa()">Entregar várias</button>
+    <button class="btn sec sm" style="flex:1" onclick="iniciarMassa()">Selecionar casas</button>
     <button class="btn sec sm" style="flex:1" onclick="devolverMassa()">Devolver várias</button>
   </div>
   <div class="card" id="comQuem" style="margin-top:12px"></div>
@@ -146,7 +148,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <div id="barraMassa" class="barra hide">
   <span id="barraTxt"></span>
   <button class="btn sec sm" onclick="cancelarMassa()">Cancelar</button>
-  <button class="btn sm" onclick="continuarMassa()">Continuar</button>
+  <button class="btn sec sm" onclick="escritorioMassa()">No escritório</button>
+  <button class="btn sm" onclick="continuarMassa()">Entregar</button>
 </div>
 
 <dialog id="dlgBackup">
@@ -172,6 +175,11 @@ const K = "chaves-obra";
 let db = JSON.parse(localStorage.getItem(K) || '{"casas":[],"portas":["F","L"],"backup":null}');
 const save = () => localStorage.setItem(K, JSON.stringify(db));
 db.funcionarios ??= [];
+// migração: chaves "na obra" que nunca foram conferidas passam a "local indefinido"
+if (!db.indefInit) {
+  db.casas.forEach(c => c.chaves.forEach(k => { if (!k.com && !k.perdida) k.indef = true; }));
+  db.indefInit = true; save();
+}
 // migração: "Frente 1"/"Fundos 1" viraram "F1"/"L1"
 if (db.portas[0] === "Frente") {
   const novo = n => n.replace(/^Frente (\d)$/, "F$1").replace(/^Fundos (\d)$/, "L$1");
@@ -194,7 +202,7 @@ function filtrarMod(m) {
 // ---------- casas do Alvorada 3 ----------
 // [módulo, fileira, de, até] — só pares ou só ímpares conforme o início
 const FILEIRAS = [[1, 1, 90, 132], [1, 2, 93, 137], [2, 1, 44, 88], [2, 2, 51, 91], [3, 1, 2, 42], [3, 2, 1, 49]];
-const novasChaves = () => db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p}${n}`, com: null, desde: null })));
+const novasChaves = () => db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p}${n}`, com: null, desde: null, indef: true })));
 if (!db.casas.length) {
   for (const [mod, fil, de, ate] of FILEIRAS)
     for (let n = de; n <= ate; n += 2) db.casas.push({ id: uid(), nome: String(n), mod, fil, chaves: novasChaves(), hist: [] });
@@ -206,7 +214,8 @@ function render() {
   const q = busca.value.trim().toLowerCase();
   const fora = db.casas.flatMap(c => c.chaves.filter(k => k.com && !k.perdida).map(k => ({ ...k, casa: c.nome })));
   const perdidas = db.casas.flatMap(c => c.chaves.filter(k => k.perdida).map(k => ({ ...k, casa: c.nome })));
-  resumo.textContent = `Alvorada 3 · ${fora.length} chave(s) fora` + (perdidas.length ? ` · ${perdidas.length} perdida(s)` : "");
+  const indef = db.casas.reduce((n, c) => n + c.chaves.filter(k => k.indef && !k.com && !k.perdida).length, 0);
+  resumo.textContent = `Alvorada 3 · ${fora.length} fora` + (perdidas.length ? ` · ${perdidas.length} perdida(s)` : "") + (indef ? ` · ${indef} sem conferir` : "");
   const bate = c => !q || c.nome.toLowerCase().includes(q) || c.chaves.some(k => k.com && k.com.toLowerCase().includes(q));
   // quem está com o quê
   const porPessoa = Object.groupBy(fora, k => k.com);
@@ -221,7 +230,7 @@ function render() {
       const nomes = [...new Set(c.chaves.filter(k => k.com && !k.perdida).map(k => k.com.split(" ")[0]))];
       if (c.chaves.some(k => k.perdida)) nomes.push("perdida");
       return `<div class="tile ${nomes.length ? "out" : ""} ${selecao?.has(c.id) ? "sel" : ""}" onclick="${selecao ? "toggleCasa" : "abrirCasa"}('${c.id}')"><b>CASA ${esc(c.nome)}</b>
-        <div class="dots">${c.chaves.map(k => `<i class="${k.perdida ? "lost" : k.com ? "out" : ""}"></i>`).join("")}</div>
+        <div class="dots">${c.chaves.map(k => `<i class="${k.perdida ? "lost" : k.com ? "out" : k.indef ? "unk" : ""}"></i>`).join("")}</div>
         <small>${esc(nomes.join(", "))}</small></div>`;
     }).join("")}</div>` : "";
   }).join("") || `<div class="empty">Nada encontrado.</div>`;
@@ -242,14 +251,16 @@ function renderCasa() {
   const c = atual;
   cTitulo.textContent = `CASA ${c.nome} · Mód. ${c.mod} · Fil. ${c.fil}`;
   const fora = c.chaves.filter(k => k.com && !k.perdida);
-  cSub.textContent = fora.length ? `${fora.length} de ${c.chaves.length} fora` : "Todas as chaves na obra";
+  const semConf = c.chaves.filter(k => k.indef && !k.com && !k.perdida).length;
+  cSub.textContent = (fora.length ? `${fora.length} de ${c.chaves.length} fora` : "Nenhuma chave fora") + (semConf ? ` · ${semConf} sem conferir` : "");
   btDev.disabled = !fora.length;
   cChaves.innerHTML = c.chaves.map(k => `
     <div class="ck"><span class="lb">${esc(k.nome)}</span>
-      <span class="st ${k.perdida ? "lost" : k.com ? "out" : ""}">${k.perdida ? `PERDIDA${k.com ? " · estava com " + esc(k.com) : ""}` : k.com ? `com ${esc(k.com)} desde ${fmt(k.desde)}` : "na obra"}</span>
+      <span class="st ${k.perdida ? "lost" : k.com ? "out" : k.indef ? "unk" : ""}">${k.perdida ? `PERDIDA${k.com ? " · estava com " + esc(k.com) : ""}` : k.com ? `com ${esc(k.com)} desde ${fmt(k.desde)}` : k.indef ? "local indefinido" : "no escritório"}</span>
+      ${k.com || k.perdida ? "" : `<button class="icobtn" title="${k.indef ? "Está no escritório" : "Não sei onde está"}" onclick="escritorio('${k.id}')">${k.indef ? "✓" : "?"}</button>`}
       <button class="icobtn" title="${k.perdida ? "Encontrada" : "Marcar como perdida"}" onclick="perdida('${k.id}')">${k.perdida ? "↩" : "⚠"}</button></div>`).join("");
   cHist.innerHTML = c.hist.length ? c.hist.map(h => `
-    <div class="hist">${{ entrega: "Entregue a", devolucao: "Devolvida por", perda: "PERDIDA", achada: "Encontrada" }[h.tipo]}${h.pessoa ? ` <b>${esc(h.pessoa)}</b>` : ""}: ${h.chaves.map(esc).join(", ")}
+    <div class="hist">${{ entrega: "Entregue a", devolucao: "Devolvida por", perda: "PERDIDA", achada: "Encontrada", conferida: "Conferida no escritório" }[h.tipo]}${h.pessoa ? ` <b>${esc(h.pessoa)}</b>` : ""}: ${h.chaves.map(esc).join(", ")}
       <small>${fmt(h.data)}${h.obs ? " · " + esc(h.obs) : ""}</small></div>`).join("") : `<span class="muted">Sem movimentações.</span>`;
 }
 
@@ -257,7 +268,7 @@ function perdida(id) {
   const k = atual.chaves.find(k => k.id === id);
   if (k.perdida) {
     if (!confirm(`"${k.nome}" foi encontrada?`)) return;
-    k.perdida = false; k.com = null; k.desde = null;
+    k.perdida = false; k.com = null; k.desde = null; k.indef = false;
     atual.hist.unshift({ data: hoje(), tipo: "achada", pessoa: "", chaves: [k.nome], obs: "" });
   } else {
     const obs = prompt(`Marcar "${k.nome}" como perdida?${k.com ? " Estava com " + k.com + "." : ""}
@@ -269,9 +280,16 @@ Observação (opcional):`);
   save(); renderCasa();
 }
 
+function escritorio(id) {
+  const k = atual.chaves.find(k => k.id === id);
+  k.indef = !k.indef;
+  if (!k.indef) atual.hist.unshift({ data: hoje(), tipo: "conferida", pessoa: "", chaves: [k.nome], obs: "" });
+  save(); renderCasa();
+}
+
 function menuCasa() {
   const op = prompt("1 = adicionar chave\n2 = remover última chave\n3 = zerar histórico");
-  if (op === "1") { const n = prompt("Nome da chave (ex: P1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
+  if (op === "1") { const n = prompt("Nome da chave (ex: P1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null, indef: true }); save(); renderCasa(); } }
   if (op === "2" && atual.chaves.length > 1 && confirm(`Remover "${atual.chaves.at(-1).nome}"?`)) { atual.chaves.pop(); save(); renderCasa(); }
   if (op === "3" && confirm(`Apagar o histórico da CASA ${atual.nome}?`)) { atual.hist = []; save(); renderCasa(); }
 }
@@ -319,6 +337,15 @@ function continuarMassa() {
   const itens = casas.flatMap(c => livresDe(c).map(k => ({ casa: c, k })));
   abrirMov("entrega", itens, casas.flatMap(c => umaDeCada(livresDe(c))), true);
 }
+function escritorioMassa() {
+  const ks = db.casas.filter(c => selecao.has(c.id)).flatMap(c => c.chaves.filter(k => k.indef && !k.com && !k.perdida).map(k => ({ c, k })));
+  if (!ks.length) return alert("Nenhuma chave sem conferir nas casas marcadas.");
+  if (!confirm(`Marcar ${ks.length} chave(s) como conferidas no escritório?`)) return;
+  ks.forEach(({ c, k }) => { k.indef = false; });
+  for (const c of db.casas) { const ns = ks.filter(x => x.c === c).map(x => x.k.nome); if (ns.length) c.hist.unshift({ data: hoje(), tipo: "conferida", pessoa: "", chaves: ns, obs: "" }); }
+  save(); cancelarMassa();
+}
+
 function devolverMassa() {
   const pessoas = [...new Set(db.casas.flatMap(c => foraDe(c).map(k => k.com)))].sort();
   if (!pessoas.length) return alert("Ninguém está com chave.");
@@ -342,7 +369,7 @@ function salvarMov(e) {
     const grupos = modo === "entrega" ? { [pessoa]: sel } : Object.groupBy(sel, k => k.com);
     for (const [p, ks] of Object.entries(grupos)) {
       casa.hist.unshift({ data: mData.value, tipo: modo, pessoa: p, chaves: ks.map(k => k.nome), obs: mObs.value.trim() });
-      ks.forEach(k => { k.com = modo === "entrega" ? pessoa : null; k.desde = modo === "entrega" ? mData.value : null; });
+      ks.forEach(k => { k.com = modo === "entrega" ? pessoa : null; k.desde = modo === "entrega" ? mData.value : null; k.indef = false; });
     }
   }
   save(); dlgMov.close();
@@ -376,7 +403,12 @@ function exportar() {
 }
 function importar(f) {
   if (!f || !confirm("Substituir todos os dados pelo backup?")) return;
-  f.text().then(t => { const d = JSON.parse(t); if (!Array.isArray(d.casas)) throw 0; db = d; db.funcionarios ??= []; save(); dlgBackup.close(); abrirLista(); })
+  f.text().then(t => { const d = JSON.parse(t); if (!Array.isArray(d.casas)) throw 0; db = d; db.funcionarios ??= [];
+// migração: chaves "na obra" que nunca foram conferidas passam a "local indefinido"
+if (!db.indefInit) {
+  db.casas.forEach(c => c.chaves.forEach(k => { if (!k.com && !k.perdida) k.indef = true; }));
+  db.indefInit = true; save();
+} save(); dlgBackup.close(); abrirLista(); })
     .catch(() => alert("Arquivo inválido."));
 }
 
