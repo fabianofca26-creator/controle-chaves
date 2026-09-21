@@ -1,0 +1,9 @@
+{
+  "name": "Chaves da Obra",
+  "short_name": "Chaves",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#0f2740",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
