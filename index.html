@@ -157,6 +157,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 // casa: {id, nome, mod, fil, chaves:[{id, nome, com:null|pessoa, desde:data, perdida?:true}], hist:[{data, tipo:'entrega'|'devolucao'|'perda'|'achada', pessoa, chaves:[nome], obs}]}
 const K = "chaves-obra";
 let db = JSON.parse(localStorage.getItem(K) || '{"casas":[],"portas":["F","L"],"backup":null}');
+const save = () => localStorage.setItem(K, JSON.stringify(db));
 db.funcionarios ??= [];
 // migração: "Frente 1"/"Fundos 1" viraram "F1"/"L1"
 if (db.portas[0] === "Frente") {
@@ -165,7 +166,6 @@ if (db.portas[0] === "Frente") {
   db.casas.forEach(c => { c.chaves.forEach(k => k.nome = novo(k.nome)); c.hist.forEach(h => h.chaves = h.chaves.map(novo)); });
   save();
 }
-const save = () => localStorage.setItem(K, JSON.stringify(db));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const hoje = () => new Date().toISOString().slice(0, 10);
 const fmt = d => d ? d.split("-").reverse().join("/") : "";
