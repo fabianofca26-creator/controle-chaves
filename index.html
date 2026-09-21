@@ -156,8 +156,15 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 // ---------- dados ----------
 // casa: {id, nome, mod, fil, chaves:[{id, nome, com:null|pessoa, desde:data, perdida?:true}], hist:[{data, tipo:'entrega'|'devolucao'|'perda'|'achada', pessoa, chaves:[nome], obs}]}
 const K = "chaves-obra";
-let db = JSON.parse(localStorage.getItem(K) || '{"casas":[],"portas":["Frente","Fundos"],"backup":null}');
+let db = JSON.parse(localStorage.getItem(K) || '{"casas":[],"portas":["F","L"],"backup":null}');
 db.funcionarios ??= [];
+// migração: "Frente 1"/"Fundos 1" viraram "F1"/"L1"
+if (db.portas[0] === "Frente") {
+  const novo = n => n.replace(/^Frente (\d)$/, "F$1").replace(/^Fundos (\d)$/, "L$1");
+  db.portas = ["F", "L"];
+  db.casas.forEach(c => { c.chaves.forEach(k => k.nome = novo(k.nome)); c.hist.forEach(h => h.chaves = h.chaves.map(novo)); });
+  save();
+}
 const save = () => localStorage.setItem(K, JSON.stringify(db));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -174,7 +181,7 @@ function filtrarMod(m) {
 // ---------- casas do Alvorada 3 ----------
 // [módulo, fileira, de, até] — só pares ou só ímpares conforme o início
 const FILEIRAS = [[1, 1, 90, 132], [1, 2, 93, 137], [2, 1, 44, 88], [2, 2, 51, 91], [3, 1, 2, 42], [3, 2, 1, 49]];
-const novasChaves = () => db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p} ${n}`, com: null, desde: null })));
+const novasChaves = () => db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p}${n}`, com: null, desde: null })));
 if (!db.casas.length) {
   for (const [mod, fil, de, ate] of FILEIRAS)
     for (let n = de; n <= ate; n += 2) db.casas.push({ id: uid(), nome: String(n), mod, fil, chaves: novasChaves(), hist: [] });
@@ -250,7 +257,7 @@ Observação (opcional):`);
 
 function menuCasa() {
   const op = prompt("1 = adicionar chave\n2 = remover última chave\n3 = zerar histórico");
-  if (op === "1") { const n = prompt("Nome da chave (ex: Portão 1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
+  if (op === "1") { const n = prompt("Nome da chave (ex: P1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
   if (op === "2" && atual.chaves.length > 1 && confirm(`Remover "${atual.chaves.at(-1).nome}"?`)) { atual.chaves.pop(); save(); renderCasa(); }
   if (op === "3" && confirm(`Apagar o histórico da CASA ${atual.nome}?`)) { atual.hist = []; save(); renderCasa(); }
 }
