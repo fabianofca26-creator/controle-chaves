@@ -66,7 +66,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .ck .st.lost,.hist.lost,.hist.lost b{color:var(--er-tx)}
 .seg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .seg button{background:transparent;border:1px solid var(--line2);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer}
-.seg button:active{background:var(--ac);color:var(--ac-tx)}
+.seg button:active,.seg button[aria-pressed=true]{background:var(--ac);color:var(--ac-tx);border-color:var(--ac);font-weight:600}
+#fMod{margin:10px 0 0}
+#fMod button{flex:1;border-radius:10px;padding:9px 4px;white-space:nowrap}
 .ck{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:15px;color:var(--tx)}
 .ck:last-child{border-bottom:0}
 .ck input{width:22px;height:22px;flex:none;margin:0}
@@ -94,6 +96,12 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button class="icobtn" onclick="dlgBackup.showModal()" title="Backup">⋮</button>
   </header>
   <input id="busca" placeholder="Buscar casa ou pessoa" oninput="render()">
+  <div class="seg" id="fMod">
+    <button aria-pressed="true" onclick="filtrarMod(0)">Todos</button>
+    <button aria-pressed="false" onclick="filtrarMod(1)">Mód. 1</button>
+    <button aria-pressed="false" onclick="filtrarMod(2)">Mód. 2</button>
+    <button aria-pressed="false" onclick="filtrarMod(3)">Mód. 3</button>
+  </div>
   <div class="card" id="comQuem" style="margin-top:12px"></div>
   <div id="casas"></div>
 </div>
@@ -156,6 +164,12 @@ const hoje = () => new Date().toISOString().slice(0, 10);
 const fmt = d => d ? d.split("-").reverse().join("/") : "";
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let atual = null;
+let modSel = 0; // 0 = todos
+function filtrarMod(m) {
+  modSel = m;
+  fMod.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", i === m));
+  render();
+}
 
 // ---------- casas do Alvorada 3 ----------
 // [módulo, fileira, de, até] — só pares ou só ímpares conforme o início
@@ -181,7 +195,7 @@ function render() {
     + (perdidas.length ? `<div class="hist lost"><b>Perdidas</b>: ${perdidas.map(k => `CASA ${esc(k.casa)} (${esc(k.nome)})`).join(" · ")}</div>` : "");
   comQuem.classList.toggle("hide", !(fora.length || perdidas.length) || !!q);
   // grade por módulo / fileira
-  casas.innerHTML = FILEIRAS.map(([mod, fil]) => {
+  casas.innerHTML = FILEIRAS.filter(([mod]) => !modSel || mod === modSel).map(([mod, fil]) => {
     const lista = db.casas.filter(c => c.mod === mod && c.fil === fil && bate(c)).sort((a, b) => a.nome - b.nome);
     return lista.length ? `<h2>Módulo ${mod} · Fileira ${fil}</h2><div class="grade">${lista.map(c => {
       const nomes = [...new Set(c.chaves.filter(k => k.com && !k.perdida).map(k => k.com.split(" ")[0]))];
