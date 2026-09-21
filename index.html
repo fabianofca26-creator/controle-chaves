@@ -53,9 +53,15 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .btn:disabled{opacity:.4}
 .btn.sec{background:transparent;color:var(--tx);border:1px solid var(--line2);font-weight:400;padding:11px}
 .btn.sm{width:auto;padding:11px 14px;font-size:14px}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.chip{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--ok-bg);color:var(--ok-tx)}
-.chip.out{background:var(--wa-bg);color:var(--wa-tx)}
+.grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:6px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center;cursor:pointer;min-height:64px}
+.tile.out{border-color:var(--wa-tx);background:var(--wa-bg)}
+.tile:active{opacity:.7}
+.tile b{font-size:16px;display:block}
+.tile small{display:block;font-size:10px;color:var(--wa-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dots{display:flex;justify-content:center;gap:3px;margin:4px 0 2px}
+.dots i{width:8px;height:8px;border-radius:50%;background:var(--ok-tx)}
+.dots i.out{background:var(--wa-tx)}
 .ck{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:15px;color:var(--tx)}
 .ck:last-child{border-bottom:0}
 .ck input{width:22px;height:22px;flex:none;margin:0}
@@ -82,10 +88,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="t"><h1>Chaves da Obra</h1><p id="resumo"></p></div>
     <button class="icobtn" onclick="dlgBackup.showModal()" title="Backup">⋮</button>
   </header>
-  <div class="row" style="margin-bottom:12px">
-    <input id="busca" placeholder="Buscar casa ou pessoa" oninput="render()">
-    <button class="btn sm n" onclick="novaCasa()">+ Casa</button>
-  </div>
+  <input id="busca" placeholder="Buscar casa ou pessoa" oninput="render()">
+  <div class="card" id="comQuem" style="margin-top:12px"></div>
   <div id="casas"></div>
 </div>
 
@@ -141,26 +145,38 @@ const fmt = d => d ? d.split("-").reverse().join("/") : "";
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let atual = null;
 
+// ---------- casas do Alvorada 3 ----------
+// [módulo, fileira, de, até] — só pares ou só ímpares conforme o início
+const FILEIRAS = [[1, 1, 90, 132], [1, 2, 93, 137], [2, 1, 44, 88], [2, 2, 51, 91], [3, 1, 2, 42], [3, 2, 1, 49]];
+const novasChaves = () => db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p} ${n}`, com: null, desde: null })));
+if (!db.casas.length) {
+  for (const [mod, fil, de, ate] of FILEIRAS)
+    for (let n = de; n <= ate; n += 2) db.casas.push({ id: uid(), nome: String(n), mod, fil, chaves: novasChaves(), hist: [] });
+  save();
+}
+
 // ---------- lista ----------
 function render() {
   const q = busca.value.trim().toLowerCase();
-  const fora = db.casas.flatMap(c => c.chaves.filter(k => k.com));
-  resumo.textContent = `${db.casas.length} casa(s) · ${fora.length} chave(s) fora`;
-  const lista = db.casas.filter(c => !q || c.nome.toLowerCase().includes(q) || c.chaves.some(k => k.com && k.com.toLowerCase().includes(q)));
-  casas.innerHTML = lista.length ? lista.map(c => `
-    <div class="card click" onclick="abrirCasa('${c.id}')">
-      <b>${esc(c.nome)}</b>
-      <div class="chips">${c.chaves.map(k => `<span class="chip ${k.com ? "out" : ""}">${esc(k.nome)}${k.com ? " · " + esc(k.com) : ""}</span>`).join("")}</div>
-    </div>`).join("") : `<div class="empty">Nenhuma casa. Toque em "+ Casa".</div>`;
+  const fora = db.casas.flatMap(c => c.chaves.filter(k => k.com).map(k => ({ ...k, casa: c.nome })));
+  resumo.textContent = `Alvorada 3 · ${fora.length} chave(s) fora`;
+  const bate = c => !q || c.nome.toLowerCase().includes(q) || c.chaves.some(k => k.com && k.com.toLowerCase().includes(q));
+  // quem está com o quê
+  const porPessoa = Object.groupBy(fora, k => k.com);
+  comQuem.innerHTML = Object.keys(porPessoa).sort().map(p => `
+    <div class="hist"><b>${esc(p)}</b>: ${Object.entries(Object.groupBy(porPessoa[p], k => k.casa)).map(([casa, ks]) => `casa ${esc(casa)} (${ks.map(k => esc(k.nome)).join(", ")})`).join(" · ")}</div>`).join("");
+  comQuem.classList.toggle("hide", !fora.length || !!q);
+  // grade por módulo / fileira
+  casas.innerHTML = FILEIRAS.map(([mod, fil]) => {
+    const lista = db.casas.filter(c => c.mod === mod && c.fil === fil && bate(c)).sort((a, b) => a.nome - b.nome);
+    return lista.length ? `<h2>Módulo ${mod} · Fileira ${fil}</h2><div class="grade">${lista.map(c => {
+      const nomes = [...new Set(c.chaves.filter(k => k.com).map(k => k.com.split(" ")[0]))];
+      return `<div class="tile ${nomes.length ? "out" : ""}" onclick="abrirCasa('${c.id}')"><b>${esc(c.nome)}</b>
+        <div class="dots">${c.chaves.map(k => `<i class="${k.com ? "out" : ""}"></i>`).join("")}</div>
+        <small>${esc(nomes.join(", "))}</small></div>`;
+    }).join("")}</div>` : "";
+  }).join("") || `<div class="empty">Nada encontrado.</div>`;
   pessoas.innerHTML = [...new Set(db.casas.flatMap(c => c.hist.map(h => h.pessoa)).filter(Boolean))].map(p => `<option value="${esc(p)}">`).join("");
-}
-
-function novaCasa() {
-  const nome = prompt("Nome ou número da casa:");
-  if (!nome) return;
-  const chaves = db.portas.flatMap(p => [1, 2].map(n => ({ id: uid(), nome: `${p} ${n}`, com: null, desde: null })));
-  db.casas.push({ id: uid(), nome: nome.trim(), chaves, hist: [] });
-  save(); render();
 }
 
 function abrirLista() { atual = null; vCasa.classList.add("hide"); vLista.classList.remove("hide"); render(); }
@@ -174,7 +190,7 @@ function abrirCasa(id) {
 
 function renderCasa() {
   const c = atual;
-  cTitulo.textContent = c.nome;
+  cTitulo.textContent = `Casa ${c.nome} · Mód. ${c.mod} · Fil. ${c.fil}`;
   const fora = c.chaves.filter(k => k.com);
   cSub.textContent = fora.length ? `${fora.length} de ${c.chaves.length} fora` : "Todas as chaves na obra";
   btDev.disabled = !fora.length;
@@ -187,10 +203,10 @@ function renderCasa() {
 }
 
 function menuCasa() {
-  const op = prompt("1 = renomear casa\n2 = adicionar chave\n3 = excluir casa");
-  if (op === "1") { const n = prompt("Novo nome:", atual.nome); if (n) { atual.nome = n.trim(); save(); renderCasa(); } }
-  if (op === "2") { const n = prompt("Nome da chave (ex: Portão 1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
-  if (op === "3" && confirm(`Excluir "${atual.nome}" e todo o histórico?`)) { db.casas = db.casas.filter(c => c !== atual); save(); abrirLista(); }
+  const op = prompt("1 = adicionar chave\n2 = remover última chave\n3 = zerar histórico");
+  if (op === "1") { const n = prompt("Nome da chave (ex: Portão 1):"); if (n) { atual.chaves.push({ id: uid(), nome: n.trim(), com: null, desde: null }); save(); renderCasa(); } }
+  if (op === "2" && atual.chaves.length > 1 && confirm(`Remover "${atual.chaves.at(-1).nome}"?`)) { atual.chaves.pop(); save(); renderCasa(); }
+  if (op === "3" && confirm(`Apagar o histórico da casa ${atual.nome}?`)) { atual.hist = []; save(); renderCasa(); }
 }
 
 // ---------- movimentação ----------
