@@ -28,7 +28,7 @@
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:30px}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:90px}
 h1,h2,h3{font-weight:600;margin:0}
 button{font:inherit;color:inherit}
 .wrap{max-width:520px;margin:0 auto;padding:0 14px}
@@ -57,6 +57,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offs
 .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center;cursor:pointer;min-height:64px}
 .tile.out{border-color:var(--wa-tx);background:var(--wa-bg)}
 .tile:active{opacity:.7}
+.tile.sel{outline:3px solid var(--ac);outline-offset:-1px}
+.barra{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--card);border-top:1px solid var(--line);padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center}
+.barra span{flex:1;font-weight:600}
 .tile b{font-size:13px;display:block;white-space:nowrap}
 .tile small{display:block;font-size:10px;color:var(--wa-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dots{display:flex;justify-content:center;gap:3px;margin:4px 0 2px}
@@ -102,6 +105,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button aria-pressed="false" onclick="filtrarMod(2)">Mód. 2</button>
     <button aria-pressed="false" onclick="filtrarMod(3)">Mód. 3</button>
   </div>
+  <div class="row" style="margin-top:10px">
+    <button class="btn sec sm" style="flex:1" onclick="iniciarMassa()">Entregar várias</button>
+    <button class="btn sec sm" style="flex:1" onclick="devolverMassa()">Devolver várias</button>
+  </div>
   <div class="card" id="comQuem" style="margin-top:12px"></div>
   <div id="casas"></div>
 </div>
@@ -135,6 +142,12 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="row"><button class="btn sec" type="button" onclick="dlgMov.close()">Cancelar</button><button class="btn">Salvar</button></div>
   </form>
 </dialog>
+
+<div id="barraMassa" class="barra hide">
+  <span id="barraTxt"></span>
+  <button class="btn sec sm" onclick="cancelarMassa()">Cancelar</button>
+  <button class="btn sm" onclick="continuarMassa()">Continuar</button>
+</div>
 
 <dialog id="dlgBackup">
   <h3 style="margin-bottom:8px">Funcionários</h3>
@@ -207,11 +220,12 @@ function render() {
     return lista.length ? `<h2>Módulo ${mod} · Fileira ${fil}</h2><div class="grade">${lista.map(c => {
       const nomes = [...new Set(c.chaves.filter(k => k.com && !k.perdida).map(k => k.com.split(" ")[0]))];
       if (c.chaves.some(k => k.perdida)) nomes.push("perdida");
-      return `<div class="tile ${nomes.length ? "out" : ""}" onclick="abrirCasa('${c.id}')"><b>CASA ${esc(c.nome)}</b>
+      return `<div class="tile ${nomes.length ? "out" : ""} ${selecao?.has(c.id) ? "sel" : ""}" onclick="${selecao ? "toggleCasa" : "abrirCasa"}('${c.id}')"><b>CASA ${esc(c.nome)}</b>
         <div class="dots">${c.chaves.map(k => `<i class="${k.perdida ? "lost" : k.com ? "out" : ""}"></i>`).join("")}</div>
         <small>${esc(nomes.join(", "))}</small></div>`;
     }).join("")}</div>` : "";
   }).join("") || `<div class="empty">Nada encontrado.</div>`;
+  if (selecao) barraTxt.textContent = `${selecao.size} casa(s)`;
   pessoas.innerHTML = [...new Set(db.casas.flatMap(c => c.hist.map(h => h.pessoa)).filter(Boolean))].map(p => `<option value="${esc(p)}">`).join("");
 }
 
@@ -263,47 +277,76 @@ function menuCasa() {
 }
 
 // ---------- movimentação ----------
+// itens: [{casa, k}] — o diálogo serve tanto pra uma casa quanto pra várias
 let modo = "entrega";
-function abrirMov(tipo, chaves, marcadas) {
+const porta = k => k.nome.replace(/\s*\d+$/, "");
+const umaDeCada = livres => livres.filter((k, i) => livres.findIndex(o => porta(o) === porta(k)) === i);
+const livresDe = c => c.chaves.filter(k => !k.com && !k.perdida);
+const foraDe = c => c.chaves.filter(k => k.com && !k.perdida);
+
+function abrirMov(tipo, itens, marcadas, varias) {
   modo = tipo;
-  mTitulo.textContent = tipo === "entrega" ? "Entregar chaves" : "Devolver chaves";
+  mTitulo.textContent = (tipo === "entrega" ? "Entregar chaves" : "Devolver chaves") + (varias ? " · " + new Set(itens.map(i => i.casa)).size + " casas" : "");
   mPessoaW.classList.toggle("hide", tipo !== "entrega");
   mPessoa.value = ""; mObs.value = ""; mData.value = hoje();
   mFunc.innerHTML = db.funcionarios.map(f => `<button type="button" onclick="mPessoa.value=this.textContent">${esc(f)}</button>`).join("");
-  mChaves.innerHTML = chaves.map(k => `
-    <label class="ck"><input type="checkbox" value="${k.id}" ${marcadas.includes(k) ? "checked" : ""}>
-      <span class="lb">${esc(k.nome)}</span><span class="st">${k.com ? "com " + esc(k.com) : ""}</span></label>`).join("");
+  mChaves.innerHTML = itens.map(({ casa, k }) => `
+    <label class="ck"><input type="checkbox" value="${casa.id}:${k.id}" ${marcadas.includes(k) ? "checked" : ""}>
+      <span class="lb">${varias ? "CASA " + esc(casa.nome) + " · " : ""}${esc(k.nome)}</span><span class="st">${k.com ? "com " + esc(k.com) : ""}</span></label>`).join("");
   dlgMov.showModal();
 }
 
 function abrirEntrega() {
-  const livres = atual.chaves.filter(k => !k.com && !k.perdida);
+  const livres = livresDe(atual);
   if (!livres.length) return alert("Nenhuma chave disponível.");
   // ponytail: pré-marca 1 de cada porta (nome sem o número final); o resto é ajuste manual
-  const porta = k => k.nome.replace(/\s*\d+$/, "");
-  const marcadas = livres.filter((k, i) => livres.findIndex(o => porta(o) === porta(k)) === i);
-  abrirMov("entrega", livres, marcadas);
+  abrirMov("entrega", livres.map(k => ({ casa: atual, k })), umaDeCada(livres));
 }
 
 function abrirDevolucao() {
-  const fora = atual.chaves.filter(k => k.com && !k.perdida);
-  abrirMov("devolucao", fora, fora);
+  const fora = foraDe(atual);
+  abrirMov("devolucao", fora.map(k => ({ casa: atual, k })), fora);
+}
+
+// em massa: seleção de casas na grade
+let selecao = null; // null = modo normal; Set de ids = escolhendo casas
+function iniciarMassa() { selecao = new Set(); barraMassa.classList.remove("hide"); render(); }
+function cancelarMassa() { selecao = null; barraMassa.classList.add("hide"); render(); }
+function toggleCasa(id) { selecao.has(id) ? selecao.delete(id) : selecao.add(id); render(); }
+function continuarMassa() {
+  const casas = db.casas.filter(c => selecao.has(c.id) && livresDe(c).length);
+  if (!casas.length) return alert("Nenhuma casa com chave disponível.");
+  const itens = casas.flatMap(c => livresDe(c).map(k => ({ casa: c, k })));
+  abrirMov("entrega", itens, casas.flatMap(c => umaDeCada(livresDe(c))), true);
+}
+function devolverMassa() {
+  const pessoas = [...new Set(db.casas.flatMap(c => foraDe(c).map(k => k.com)))].sort();
+  if (!pessoas.length) return alert("Ninguém está com chave.");
+  const p = pessoas.length === 1 ? pessoas[0] : prompt("De quem?\n" + pessoas.map((p, i) => `${i + 1} = ${p}`).join("\n"));
+  const pessoa = pessoas.includes(p) ? p : pessoas[+p - 1];
+  if (!pessoa) return;
+  const itens = db.casas.flatMap(c => foraDe(c).filter(k => k.com === pessoa).map(k => ({ casa: c, k })));
+  abrirMov("devolucao", itens, itens.map(i => i.k), true);
 }
 
 function salvarMov(e) {
   e.preventDefault();
-  const ids = [...mChaves.querySelectorAll("input:checked")].map(i => i.value);
-  if (!ids.length) return alert("Marque pelo menos uma chave.");
+  const ids = new Set([...mChaves.querySelectorAll("input:checked")].map(i => i.value));
+  if (!ids.size) return alert("Marque pelo menos uma chave.");
   const pessoa = mPessoa.value.trim();
   if (modo === "entrega" && !pessoa) return alert("Informe para quem.");
-  const sel = atual.chaves.filter(k => ids.includes(k.id));
-  // devolução pode misturar chaves de pessoas diferentes: um registro por pessoa
-  const grupos = modo === "entrega" ? { [pessoa]: sel } : Object.groupBy(sel, k => k.com);
-  for (const [p, ks] of Object.entries(grupos)) {
-    atual.hist.unshift({ data: mData.value, tipo: modo, pessoa: p, chaves: ks.map(k => k.nome), obs: mObs.value.trim() });
-    ks.forEach(k => { k.com = modo === "entrega" ? pessoa : null; k.desde = modo === "entrega" ? mData.value : null; });
+  for (const casa of db.casas) {
+    const sel = casa.chaves.filter(k => ids.has(casa.id + ":" + k.id));
+    if (!sel.length) continue;
+    // devolução pode misturar chaves de pessoas diferentes: um registro por pessoa
+    const grupos = modo === "entrega" ? { [pessoa]: sel } : Object.groupBy(sel, k => k.com);
+    for (const [p, ks] of Object.entries(grupos)) {
+      casa.hist.unshift({ data: mData.value, tipo: modo, pessoa: p, chaves: ks.map(k => k.nome), obs: mObs.value.trim() });
+      ks.forEach(k => { k.com = modo === "entrega" ? pessoa : null; k.desde = modo === "entrega" ? mData.value : null; });
+    }
   }
-  save(); dlgMov.close(); renderCasa();
+  save(); dlgMov.close();
+  if (atual) renderCasa(); else cancelarMassa();
 }
 
 // ---------- funcionários ----------
